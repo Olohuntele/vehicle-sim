@@ -21,7 +21,8 @@ private:
     const double front_weight_ratio = 0.6; // 60% static front axle weight ratio
 
 public:
-    Vehicle();
+    Vehicle(double initial_velocity = 0.0);
+    void setVelocity(double v);
     void setControlInput(double input);
     void setBrakeInput(double brake);
     void update(double dt);
@@ -32,6 +33,7 @@ public:
     double getBrakeForce() const;
     double getWeightTransfer() const;
     double getFrontAxleLoad() const;
+    double getMaxBrake() const;
 };
 
 #endif

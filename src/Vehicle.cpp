@@ -1,8 +1,12 @@
 #include "Vehicle.hpp"
 #include <algorithm>
 
-Vehicle::Vehicle() 
-    : position(0.0), velocity(0.0), acceleration(0.0), drag_force(0.0), brake_force(0.0), weight_transfer(0.0) {}
+Vehicle::Vehicle(double initial_velocity) 
+    : position(0.0), velocity(initial_velocity), acceleration(0.0), drag_force(0.0), brake_force(0.0), weight_transfer(0.0) {}
+
+void Vehicle::setVelocity(double v) {
+    velocity = v;
+}
 
 void Vehicle::setControlInput(double input) {
     input = std::clamp(input, -1.0, 1.0);
@@ -52,3 +56,4 @@ double Vehicle::getFrontAxleLoad() const {
     double static_front_load = mass * g * front_weight_ratio;
     return static_front_load + weight_transfer;
 }
+double Vehicle::getMaxBrake() const { return max_brake; }
