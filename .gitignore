@@ -23,3 +23,9 @@ sim3d
 *.key
 secrets/
 config.local.json
+
+# AI Assistant Logs & History
+.aider*
+.aider.chat.history
+.aider.input.history
+*.cache
