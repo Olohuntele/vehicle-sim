@@ -1,3 +1,0 @@
-/workspaces/vehicle-sim/build/CMakeFiles/sim.dir
-/workspaces/vehicle-sim/build/CMakeFiles/edit_cache.dir
-/workspaces/vehicle-sim/build/CMakeFiles/rebuild_cache.dir

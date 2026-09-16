@@ -1,0 +1,25 @@
+# Build directories and binaries
+build/
+bin/
+out/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+sim
+sim3d
+*.exe
+
+# IDE & OS files
+.vscode/
+.DS_Store
+*.swp
+
+# Sensitive data & environment files
+*.env
+*.pem
+*.key
+secrets/
+config.local.json
