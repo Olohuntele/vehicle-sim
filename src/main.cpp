@@ -6,101 +6,130 @@ int main() {
     const int screenWidth = 800;
     const int screenHeight = 450;
     
-    InitWindow(screenWidth, screenHeight, "AEB Simulation - Interactive Telemetry");
+    InitWindow(screenWidth, screenHeight, "AEB Simulation - Dynamic Target Tracking");
     SetTargetFPS(60);
 
-    float carX = 50.0f;
-    float carSpeed = 0.0f;
-    const float maxSpeed = 12.0f;
-    const float accel = 0.15f;
+    // Ego Vehicle (Blue)
+    float egoX = 50.0f;
+    float egoSpeed = 0.0f;
+    const float maxEgoSpeed = 12.0f;
+    const float egoAccel = 0.15f;
     const float aebBrake = 0.4f;
     
-    const float obstacleX = 650.0f;
-    const float sensorRange = 300.0f;
+    // Moving Target Vehicle (Red Obstacle)
+    float targetX = 500.0f;
+    float targetSpeed = 2.0f; // Initial cruising speed
+    const float sensorRange = 350.0f;
+    
     bool aebTriggered = false;
     bool autoDrive = false;
 
     while (!WindowShouldClose()) {
-        // --- Controls: Mouse Click or Keys ---
-        // Click screen to toggle Auto-Drive, or press R to reset
+        // --- Controls ---
+        // Click screen to toggle Ego Vehicle Auto-Drive
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_SPACE)) {
             autoDrive = !autoDrive;
         }
 
+        // Reset Scenario
         if (IsKeyPressed(KEY_R)) {
-            carX = 50.0f;
-            carSpeed = 0.0f;
+            egoX = 50.0f;
+            egoSpeed = 0.0f;
+            targetX = 500.0f;
+            targetSpeed = 2.0f;
             aebTriggered = false;
             autoDrive = false;
         }
 
-        // --- Controller & Physics Logic ---
-        float distanceToObstacle = obstacleX - (carX + 60.0f);
-        if (distanceToObstacle < 0.0f) distanceToObstacle = 0.0f;
+        // Control Target Vehicle Speed (UP = speed up, DOWN = slow down/stop)
+        if (IsKeyDown(KEY_UP)) targetSpeed += 0.05f;
+        if (IsKeyDown(KEY_DOWN)) targetSpeed -= 0.05f;
+        if (targetSpeed < 0.0f) targetSpeed = 0.0f;
+        if (targetSpeed > 8.0f) targetSpeed = 8.0f;
 
-        float ttc = (carSpeed > 0.001f) ? (distanceToObstacle / (carSpeed * 60.0f)) : 99.9f;
-        float stoppingDistance = (carSpeed * carSpeed) / (2.0f * aebBrake);
+        // Move Target Vehicle
+        targetX += targetSpeed;
+        if (targetX > 750.0f) targetX = 750.0f; // Track boundary
 
-        // AEB Trigger Condition
-        if (distanceToObstacle > 0.0f && distanceToObstacle <= stoppingDistance + 20.0f && carSpeed > 0.5f) {
+        // --- Kinematics & Relative Telemetry ---
+        float relativeDistance = targetX - (egoX + 60.0f);
+        if (relativeDistance < 0.0f) relativeDistance = 0.0f;
+
+        // Relative speed (closing rate)
+        float relativeSpeed = egoSpeed - targetSpeed;
+        
+        // Calculate Time-To-Collision based on relative velocity
+        float ttc = (relativeSpeed > 0.001f) ? (relativeDistance / (relativeSpeed * 60.0f)) : 99.9f;
+
+        // Required Stopping Distance based on relative deceleration needed
+        float stoppingDistance = (egoSpeed * egoSpeed) / (2.0f * aebBrake);
+
+        // AEB Trigger Condition: Closing in fast on moving or stationary target
+        if (relativeDistance > 0.0f && relativeDistance <= stoppingDistance + 25.0f && relativeSpeed > 0.5f) {
             aebTriggered = true;
             autoDrive = false;
         }
 
-        // Drive / Brake Logic
+        // Ego Braking / Drive Logic
         if (aebTriggered) {
-            carSpeed -= aebBrake;
-            if (carSpeed <= 0.0f) carSpeed = 0.0f;
+            egoSpeed -= aebBrake;
+            if (egoSpeed <= 0.0f) egoSpeed = 0.0f;
         } else {
             if (autoDrive || IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) {
-                carSpeed += accel;
+                egoSpeed += egoAccel;
             } else {
-                carSpeed -= 0.05f; // Gradual slowdown when not accelerating
+                egoSpeed -= 0.05f;
             }
-            if (carSpeed > maxSpeed) carSpeed = maxSpeed;
-            if (carSpeed < 0.0f) carSpeed = 0.0f;
+            if (egoSpeed > maxEgoSpeed) egoSpeed = maxEgoSpeed;
+            if (egoSpeed < 0.0f) egoSpeed = 0.0f;
         }
 
-        carX += carSpeed;
-        if (carX + 60.0f >= obstacleX) {
-            carX = obstacleX - 60.0f;
-            carSpeed = 0.0f;
+        // Update Ego Position
+        egoX += egoSpeed;
+        if (egoX + 60.0f >= targetX) {
+            egoX = targetX - 60.0f; // Bumper contact boundary
+            egoSpeed = targetSpeed;
         }
 
-        // --- Rendering ---
+        // --- Visual Rendering ---
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        // Track & Obstacle
+        // Track / Environment
         DrawRectangle(0, 280, 800, 100, LIGHTGRAY);
         DrawLine(0, 330, 800, 330, WHITE);
-        DrawRectangle((int)obstacleX, 230, 25, 70, RED);
+
+        // Moving Target Vehicle (Red)
+        DrawRectangle((int)targetX, 240, 50, 30, RED);
+        DrawCircle((int)targetX + 12, 275, 7, BLACK);
+        DrawCircle((int)targetX + 38, 275, 7, BLACK);
 
         // Sensor Field Beam
-        if (carSpeed > 0 || aebTriggered) {
-            Color beamColor = aebTriggered ? RED : (ttc < 2.0f ? ORANGE : GREEN);
-            float beamLength = (distanceToObstacle < sensorRange) ? distanceToObstacle : sensorRange;
-            DrawRectangle((int)(carX + 60), 258, (int)beamLength, 10, Fade(beamColor, 0.3f));
-            DrawLine((int)(carX + 60), 263, (int)(carX + 60 + beamLength), 263, beamColor);
+        if (egoSpeed > 0 || aebTriggered) {
+            Color beamColor = aebTriggered ? RED : (ttc < 2.5f ? ORANGE : GREEN);
+            float beamLength = (relativeDistance < sensorRange) ? relativeDistance : sensorRange;
+            DrawRectangle((int)(egoX + 60), 258, (int)beamLength, 10, Fade(beamColor, 0.3f));
+            DrawLine((int)(egoX + 60), 263, (int)(egoX + 60 + beamLength), 263, beamColor);
         }
 
-        // Vehicle
-        DrawRectangle((int)carX, 240, 60, 30, DARKBLUE);
-        DrawCircle((int)carX + 15, 275, 8, BLACK);
-        DrawCircle((int)carX + 45, 275, 8, BLACK);
+        // Ego Vehicle (Blue)
+        DrawRectangle((int)egoX, 240, 60, 30, DARKBLUE);
+        DrawCircle((int)egoX + 15, 275, 8, BLACK);
+        DrawCircle((int)egoX + 45, 275, 8, BLACK);
 
-        // HUD
-        DrawRectangle(10, 10, 380, 150, Fade(BLACK, 0.8f));
-        Color statusColor = aebTriggered ? RED : (ttc < 2.0f ? ORANGE : GREEN);
-        const char* statusText = aebTriggered ? "AEB ACTIVE (EMERGENCY BRAKE)" : (autoDrive ? "DRIVING (CLICK TO PAUSE)" : "CLICK ANYWHERE TO DRIVE");
+        // Telemetry HUD
+        DrawRectangle(10, 10, 420, 160, Fade(BLACK, 0.8f));
+        Color statusColor = aebTriggered ? RED : (ttc < 2.5f ? ORANGE : GREEN);
+        const char* statusText = aebTriggered ? "AEB ACTIVE (MOVING TARGET DETECTED)" : (autoDrive ? "DRIVING (CLICK TO PAUSE)" : "CLICK ANYWHERE TO DRIVE");
         
-        DrawText(statusText, 25, 25, 16, statusColor);
-        DrawText(TextFormat("Speed: %.1f px/f (%.1f km/h eq)", carSpeed, carSpeed * 10.0f), 25, 55, 16, WHITE);
-        DrawText(TextFormat("Distance: %.1f px", distanceToObstacle), 25, 80, 16, WHITE);
-        DrawText(TextFormat("TTC: %.2f s", ttc), 25, 105, 16, ttc < 2.0f ? ORANGE : WHITE);
-        DrawText(TextFormat("Stopping Dist: %.1f px", stoppingDistance), 25, 130, 16, WHITE);
+        DrawText(statusText, 25, 20, 15, statusColor);
+        DrawText(TextFormat("Ego Speed: %.1f px/f | Target Speed: %.1f px/f", egoSpeed, targetSpeed), 25, 45, 15, WHITE);
+        DrawText(TextFormat("Closing Rate (Rel Speed): %.1f px/f", relativeSpeed > 0 ? relativeSpeed : 0.0f), 25, 70, 15, WHITE);
+        DrawText(TextFormat("Relative Distance: %.1f px", relativeDistance), 25, 95, 15, WHITE);
+        DrawText(TextFormat("TTC: %.2f s", ttc), 25, 120, 15, ttc < 2.5f ? ORANGE : WHITE);
+        DrawText(TextFormat("Req. Stopping Dist: %.1f px", stoppingDistance), 25, 145, 15, WHITE);
 
-        DrawText("Control: CLICK WINDOW to start/pause car drive | [R] Reset", 20, 410, 15, DARKGRAY);
+        DrawText("Control: CLICK WINDOW to start ego car | [UP/DOWN] Change target speed | [R] Reset", 15, 415, 14, DARKGRAY);
 
         EndDrawing();
     }
