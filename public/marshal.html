@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Drive - Transport Marshal Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #eef2f7; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 700px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { color: #1b4d3e; text-align: center; }
+        .card { background: #f9fbfd; border: 1px solid #e1e8ed; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .btn-group { display: flex; gap: 10px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; }
+        .btn-dispatch { background: #2e7d32; }
+        .btn-recall { background: #c62828; }
+        button:hover { opacity: 0.9; }
+        pre { background: #263238; color: #eceff1; padding: 10px; border-radius: 6px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Marshal Control Dashboard</h1>
+        <p style="text-align: center; color: #666;">ADUSTW Wudil Campus Fleet Management</p>
+
+        <div class="card">
+            <h3>Live Vehicle & Queue Status</h3>
+            <pre id="queueStatus">Loading status...</pre>
+        </div>
+
+        <div class="card">
+            <h3>Transport Marshal Manual Overrides</h3>
+            <div class="btn-group">
+                <button class="btn-dispatch" onclick="sendOverride('DISPATCH')">Command Dispatch</button>
+                <button class="btn-recall" onclick="sendOverride('RECALL')">Recall Empty Vehicle</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Financial Ledger & Revenue Split (25% / 75%)</h3>
+            <pre id="financialLedger">Loading ledger...</pre>
+        </div>
+    </div>
+
+    <script>
+        async function refreshData() {
+            try {
+                const qRes = await fetch('/api/queue/status');
+                const qData = await qRes.json();
+                document.getElementById('queueStatus').innerText = JSON.stringify(qData.status, null, 2);
+
+                const fRes = await fetch('/api/financial/ledger');
+                const fData = await fRes.json();
+                document.getElementById('financialLedger').innerText = JSON.stringify(fData.ledger, null, 2);
+            } catch (e) {
+                console.error("Failed to refresh status", e);
+            }
+        }
+
+        async function sendOverride(action) {
+            const res = await fetch('/api/marshal/override', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            const data = await res.json();
+            alert(`Override action '${action}' result: ${data.success ? 'SUCCESS' : 'FAILED'}`);
+            refreshData();
+        }
+
+        setInterval(refreshData, 3000);
+        refreshData();
+    </script>
+</body>
+</html>

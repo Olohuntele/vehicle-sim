@@ -2,7 +2,17 @@
 #include <algorithm>
 
 Vehicle::Vehicle(double initial_velocity) 
-    : position(0.0), velocity(initial_velocity), acceleration(0.0), drag_force(0.0), brake_force(0.0), weight_transfer(0.0) {}
+    : position(0.0), velocity(initial_velocity), acceleration(0.0), drag_force(0.0), brake_force(0.0), weight_transfer(0.0), road_friction(0.8) {}
+
+void Vehicle::reset(double initial_velocity) {
+    position = 0.0;
+    velocity = initial_velocity;
+    acceleration = 0.0;
+    drag_force = 0.0;
+    brake_force = 0.0;
+    weight_transfer = 0.0;
+    road_friction = 0.8;
+}
 
 void Vehicle::setVelocity(double v) {
     velocity = v;
@@ -24,15 +34,29 @@ void Vehicle::setBrakeInput(double brake) {
     brake_force = brake * mass * max_brake;
 }
 
+void Vehicle::setRoadFriction(double friction) {
+    road_friction = std::clamp(friction, 0.05, 1.0);
+}
+
 void Vehicle::update(double dt) {
     drag_force = 0.5 * air_density * cd * frontal_area * velocity * velocity;
     
-    // Apply brake force only if vehicle is moving
-    double effective_brake_force = (velocity > 0.0) ? brake_force : 0.0;
-    
+    // Tire-road friction force limit (F_friction = mu * m * g)
+    double max_friction_force = road_friction * mass * g;
+
+    // Cap drive force by friction limit
     double drive_force = acceleration * mass;
-    double net_force = drive_force - drag_force - effective_brake_force;
+    if (drive_force > max_friction_force) {
+        drive_force = max_friction_force;
+    }
+
+    // Apply brake force only if vehicle is moving, capped by friction limit
+    double effective_brake_force = (velocity > 0.0) ? brake_force : 0.0;
+    if (effective_brake_force > max_friction_force) {
+        effective_brake_force = max_friction_force;
+    }
     
+    double net_force = drive_force - drag_force - effective_brake_force;
     double net_accel = net_force / mass;
 
     velocity += net_accel * dt;
@@ -57,3 +81,4 @@ double Vehicle::getFrontAxleLoad() const {
     return static_front_load + weight_transfer;
 }
 double Vehicle::getMaxBrake() const { return max_brake; }
+double Vehicle::getRoadFriction() const { return road_friction; }

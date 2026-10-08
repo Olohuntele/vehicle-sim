@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Drive - Campus QR Booking</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { color: #1b4d3e; text-align: center; font-size: 24px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        select, input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        button { background: #1b4d3e; color: white; border: none; padding: 12px; width: 100%; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #14382d; }
+        #result { margin-top: 20px; padding: 15px; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Easy Drive Transit</h1>
+        <p style="text-align: center; color: #666;">ADUSTW Wudil Campus Transport Fleet</p>
+        
+        <div class="form-group">
+            <label for="passengerId">Student ID / Passenger Name:</label>
+            <input type="text" id="passengerId" placeholder="e.g. ADUSTW/2023/1234" value="STUDENT_01">
+        </div>
+
+        <div class="form-group">
+            <label for="origin">Pickup Station (#1 to #52):</label>
+            <select id="origin"></select>
+        </div>
+
+        <div class="form-group">
+            <label for="destination">Destination Station (#1 to #52):</label>
+            <select id="destination"></select>
+        </div>
+
+        <div class="form-group">
+            <label for="paymentType">Payment Type:</label>
+            <select id="paymentType">
+                <option value="DIGITAL">Digital QR Payment (Paystack/Flutterwave Split)</option>
+                <option value="CASH_PROXY">Marshal Cash Proxy (Float Collection)</option>
+            </select>
+        </div>
+
+        <button onclick="bookSeat()">Book Seat & Get ETA</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function loadStations() {
+            const res = await fetch('/api/stations');
+            const data = await res.json();
+            if (data.success) {
+                const originSelect = document.getElementById('origin');
+                const destSelect = document.getElementById('destination');
+                data.stations.forEach(s => {
+                    originSelect.add(new Option(`${s.id} - ${s.name}`, s.id));
+                    destSelect.add(new Option(`${s.id} - ${s.name}`, s.id));
+                });
+            }
+        }
+
+        async function bookSeat() {
+            const passengerId = document.getElementById('passengerId').value;
+            const origin = document.getElementById('origin').value;
+            const destination = document.getElementById('destination').value;
+            const paymentType = document.getElementById('paymentType').value;
+
+            const res = await fetch('/api/book', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ passengerId, origin, destination, paymentType, fare: 150 })
+            });
+
+            const data = await res.json();
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+
+            if (data.success) {
+                resultDiv.style.background = '#e8f5e9';
+                resultDiv.style.borderColor = '#c8e6c9';
+                resultDiv.innerHTML = `<strong>Booking Confirmed!</strong><br>${data.message}<br><small>Slots remaining in queue: ${data.slotsRemaining}</small>`;
+            } else {
+                resultDiv.style.background = '#ffebee';
+                resultDiv.style.borderColor = '#ffcdd2';
+                resultDiv.innerHTML = `<strong>Booking Failed:</strong> ${data.message}`;
+            }
+        }
+
+        loadStations();
+    </script>
+</body>
+</html>

@@ -19,12 +19,15 @@ private:
     const double wheelbase = 2.5;       // m
     const double g = 9.81;              // m/s^2
     const double front_weight_ratio = 0.6; // 60% static front axle weight ratio
+    double road_friction;               // Tire-road friction coefficient (mu)
 
 public:
     Vehicle(double initial_velocity = 0.0);
+    void reset(double initial_velocity = 0.0);
     void setVelocity(double v);
     void setControlInput(double input);
     void setBrakeInput(double brake);
+    void setRoadFriction(double friction);
     void update(double dt);
     double getPosition() const;
     double getVelocity() const;
@@ -34,6 +37,7 @@ public:
     double getWeightTransfer() const;
     double getFrontAxleLoad() const;
     double getMaxBrake() const;
+    double getRoadFriction() const;
 };
 
 #endif
