@@ -17,6 +17,10 @@ sim3d
 .DS_Store
 *.swp
 
+# Godot engine files
+.godot/
+godot_sim/.godot/
+
 # Sensitive data & environment files
 *.env
 *.pem
