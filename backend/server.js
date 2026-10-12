@@ -11,7 +11,7 @@ const TransitService = require('./transit_service');
 const transit = new TransitService();
 let latestDispatchedTrip = null;
 
-const server = http.createServer((req, res) => {
+const requestListener = (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     
     const sendJson = (statusCode, data) => {
@@ -115,15 +115,19 @@ const server = http.createServer((req, res) => {
     }
 
     return sendJson(404, { success: false, message: "Endpoint not found" });
-});
+};
+
+const server = http.createServer(requestListener);
 
 server.on('error', (err) => {
     console.error('[EASY DRIVE CLOUD ERROR]', err);
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[EASY DRIVE CLOUD] Backend server running on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`[EASY DRIVE CLOUD] Backend server running on http://localhost:${PORT}`);
+    });
+}
 
-module.exports = server;
+module.exports = requestListener;

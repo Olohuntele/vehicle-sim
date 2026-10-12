@@ -30,6 +30,9 @@ server.listen(PORT, async () => {
                 res.on('end', () => resolve(JSON.parse(body)));
             });
             req.on('error', reject);
+            req.setTimeout(5000, () => {
+                req.destroy(new Error(`Request timeout for ${method} ${path}`));
+            });
             if (dataStr) req.write(dataStr);
             req.end();
         });

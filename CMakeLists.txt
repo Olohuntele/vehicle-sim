@@ -13,11 +13,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
-add_executable(sim src/main.cpp src/Vehicle.cpp)
-target_include_directories(sim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(sim PRIVATE raylib)
+add_library(vehicle_core STATIC src/vehicle_core.cpp src/Vehicle.cpp)
+target_include_directories(vehicle_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(vehicle_bridge SHARED src/vehicle_bridge.cpp)
+target_link_libraries(vehicle_bridge PRIVATE vehicle_core)
+target_include_directories(vehicle_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_executable(sim src/main.cpp)
+target_link_libraries(sim PRIVATE vehicle_core raylib)
 
 enable_testing()
-add_executable(sim_tests tests/test_main.cpp src/Vehicle.cpp)
-target_include_directories(sim_tests PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_executable(sim_tests tests/test_main.cpp)
+target_link_libraries(sim_tests PRIVATE vehicle_core vehicle_bridge)
 add_test(NAME VehicleSimUnitTests COMMAND sim_tests)
