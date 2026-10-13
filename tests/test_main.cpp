@@ -86,6 +86,27 @@ void testVehicleBridgeInterface() {
     std::cout << "Vehicle bridge interface tests passed successfully.\n";
 }
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+void testGDExtensionBridgeLoad() {
+    std::cout << "Running testGDExtensionBridgeLoad (Phase 2A.4 GDExtension DLL Validation)...\n";
+#ifdef _WIN32
+    HMODULE hMod = LoadLibraryA("godot_sim/bin/easydrive_extension.dll");
+    assert(hMod != nullptr && "Failed to load easydrive_extension.dll");
+    
+    FARPROC initProc = GetProcAddress(hMod, "easydrive_library_init");
+    assert(initProc != nullptr && "Failed to find easydrive_library_init entry point in DLL");
+    
+    std::cout << "Successfully loaded easydrive_extension.dll and resolved entry point 'easydrive_library_init'.\n";
+    FreeLibrary(hMod);
+#else
+    std::cout << "Skipping Windows GDExtension load test on non-Windows platform.\n";
+#endif
+    std::cout << "GDExtension bridge load test passed successfully.\n";
+}
+
 int main() {
     std::cout << "=== Starting Vehicle Core, Bridge & Trajectory Tests ===\n";
     try {
@@ -93,6 +114,7 @@ int main() {
         testCollisionAvoidance();
         testACCController();
         testVehicleBridgeInterface();
+        testGDExtensionBridgeLoad();
         std::cout << "=== ALL TESTS PASSED SUCCESSFULLY ===\n";
         return 0;
     } catch (const std::exception& e) {
