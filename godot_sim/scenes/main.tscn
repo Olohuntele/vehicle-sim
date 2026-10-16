@@ -221,11 +221,20 @@ transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0,
 
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
 
-[node name="HUD" type="Label" parent="CanvasLayer"]
-offset_left = 20.0
-offset_top = 20.0
-offset_right = 550.0
-offset_bottom = 180.0
+[node name="TelemetryPanel" type="ScrollContainer" parent="CanvasLayer"]
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 465.0
+offset_bottom = 560.0
+horizontal_scroll_mode = 0
+
+[node name="HUD" type="Label" parent="CanvasLayer/TelemetryPanel"]
+layout_mode = 2
+autowrap_mode = 3
+custom_minimum_size = Vector2(435, 0)
 theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 18
 text = "HUD Initializing..."

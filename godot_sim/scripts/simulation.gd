@@ -19,7 +19,7 @@ var cpp_bridge = null
 @onready var ego_car: Node3D = $EgoCar
 @onready var lead_car: Node3D = $LeadCar
 @onready var follow_camera: Camera3D = $FollowCamera
-@onready var hud_label: Label = $CanvasLayer/HUD
+@onready var hud_label: Label = $CanvasLayer/TelemetryPanel/HUD
 
 func _ready() -> void:
     if ClassDB.class_exists("EasyDriveBridge"):
@@ -177,6 +177,35 @@ func _process(delta: float) -> void:
     var scenario_name = "BLOCKED-ROAD (Obstacle at Z=60)" if scenario_blocked_road else "CLEAR-ROAD (Destination B at Z=100)"
     
     var s_control = shadow_result.get("control_input", 0.0)
+    # --- Stage 3: Controller Comparison ---
+    var cpp_equivalent_accel: float = 0.0
+
+    if s_control >= 0.0:
+        cpp_equivalent_accel = s_control * ego_max_accel
+    else:
+        cpp_equivalent_accel = s_control * ego_max_brake
+
+    var accel_difference: float = abs(accel - cpp_equivalent_accel)
+    var comparison_status: String = "MATCH"
+    var comparison_detail: String = ""
+
+    if shadow_result.is_empty():
+        comparison_status = "C++ SHADOW UNAVAILABLE"
+    elif ego_speed < 0.05 and accel <= 0.0 and cpp_equivalent_accel <= 0.0:
+        comparison_status = "STATIONARY - BRAKING / HOLDING"
+    elif accel < -0.05 and cpp_equivalent_accel < -0.05:
+        comparison_status = "BOTH BRAKING"
+    elif accel > 0.05 and cpp_equivalent_accel > 0.05:
+        comparison_status = "BOTH ACCELERATING"
+    elif accel > 0.05 and cpp_equivalent_accel < -0.05:
+        comparison_status = "OPPOSITE DECISIONS"
+    elif accel < -0.05 and cpp_equivalent_accel > 0.05:
+        comparison_status = "OPPOSITE DECISIONS"
+    elif accel_difference > 0.5:
+        comparison_status = "DIFFERENT DECISIONS"
+
+    if not shadow_result.is_empty():
+        comparison_detail = "Intensity difference: %.2f m/sÂ²" % accel_difference
     var s_aeb = shadow_result.get("aeb_triggered", false)
     var s_acc = shadow_result.get("acc_active", false)
     var s_clearance = shadow_result.get("bumper_clearance", 0.0)
@@ -206,5 +235,12 @@ func _process(delta: float) -> void:
             "  - AEB Triggered: %s\n" % [s_aeb] + \
             "  - Bumper Clearance: %.2f m\n" % [s_clearance] + \
             "  - Est. Stopping Dist: %.2f m\n" % [s_stop_dist] + \
+            "----------------------------------------\n" + \
+            "CONTROLLER COMPARISON:\n" + \
+            "  GDScript Accel: %.2f m/sÃ‚Â²\n" % [accel] + \
+            "  C++ Equivalent Accel: %.2f m/sÃ‚Â²\n" % [cpp_equivalent_accel] + \
+            "  Difference: %.2f m/sÃ‚Â²\n" % [accel_difference] + \
+            "  Comparison: %s\n" % [comparison_status] + \
+            "  Detail: %s\n" % [comparison_detail] + \
             "----------------------------------------\n" + \
             "Controls: [1] Blocked-Road | [2] Clear-Road | [SPACE] Auto/Manual | [R] Reset"

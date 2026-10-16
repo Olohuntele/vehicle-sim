@@ -12,3 +12,10 @@ config/features=PackedStringArray("4.7", "Compatibility")
 [rendering]
 
 renderer/rendering_method="compatibility"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1024
+window/size/window_height_override=576
