@@ -34,9 +34,10 @@ add_library(easydrive_extension SHARED
     src/gdextension/easy_drive_bridge.cpp
     src/gdextension/register_types.cpp
 )
-target_link_libraries(easydrive_extension PRIVATE godot-cpp)
+target_link_libraries(easydrive_extension PRIVATE godot-cpp vehicle_core)
 target_include_directories(easydrive_extension PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gdextension
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 set_target_properties(easydrive_extension PROPERTIES
     PREFIX ""

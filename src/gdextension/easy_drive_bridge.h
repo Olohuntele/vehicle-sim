@@ -3,6 +3,11 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/binder_common.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+
+namespace vehicle_sim {
+class VehicleCoreController;
+}
 
 namespace godot {
 
@@ -17,6 +22,14 @@ public:
     ~EasyDriveBridge();
 
     String get_bridge_status() const;
+    Dictionary evaluate_shadow_step(
+        double ego_pos, double ego_speed, double ego_accel,
+        bool obstacle_detected, double obstacle_pos, double obstacle_speed,
+        bool auto_drive, double manual_input, double destination_b
+    );
+
+private:
+    vehicle_sim::VehicleCoreController* controller_;
 };
 
 } // namespace godot

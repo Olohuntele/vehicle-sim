@@ -14,13 +14,22 @@ var auto_drive: bool = true
 var ego_length: float = 4.0
 var lead_length: float = 4.0
 
+var cpp_bridge = null
+
 @onready var ego_car: Node3D = $EgoCar
 @onready var lead_car: Node3D = $LeadCar
 @onready var follow_camera: Camera3D = $FollowCamera
 @onready var hud_label: Label = $CanvasLayer/HUD
 
 func _ready() -> void:
+    if ClassDB.class_exists("EasyDriveBridge"):
+        cpp_bridge = ClassDB.instantiate("EasyDriveBridge")
     reset_simulation()
+
+func _exit_tree() -> void:
+    if cpp_bridge:
+        cpp_bridge.free()
+        cpp_bridge = null
 
 func reset_simulation() -> void:
     ego_pos = 0.0
@@ -113,6 +122,18 @@ func _process(delta: float) -> void:
             accel = -0.5 # drag/coasting
             braking_state = "COASTING"
 
+    # --- 2.5 C++ Shadow Evaluation (Shadow Mode Only) ---
+    var shadow_result = {}
+    if cpp_bridge and cpp_bridge.has_method("evaluate_shadow_step"):
+        var obs_detected = scenario_blocked_road
+        var obs_pos = lead_pos if scenario_blocked_road else 999.0
+        var obs_speed = lead_speed if scenario_blocked_road else 0.0
+        shadow_result = cpp_bridge.evaluate_shadow_step(
+            ego_pos, ego_speed, accel,
+            obs_detected, obs_pos, obs_speed,
+            auto_drive, manual_input, target_b
+        )
+
     # --- 3. Kinematics & Position Update ---
     ego_speed = max(0.0, ego_speed + accel * delta)
     ego_pos += ego_speed * delta
@@ -152,8 +173,22 @@ func _process(delta: float) -> void:
         if ego_speed == 0.0 && ego_pos >= 98.0:
             contact_status = "SUCCESS: STOPPED AT POINT B (Z=100)"
 
-    # --- 6. HUD Update ---
+    # --- 6. HUD Update (GDScript + C++ Shadow Telemetry) ---
     var scenario_name = "BLOCKED-ROAD (Obstacle at Z=60)" if scenario_blocked_road else "CLEAR-ROAD (Destination B at Z=100)"
+    
+    var s_control = shadow_result.get("control_input", 0.0)
+    var s_aeb = shadow_result.get("aeb_triggered", false)
+    var s_acc = shadow_result.get("acc_active", false)
+    var s_clearance = shadow_result.get("bumper_clearance", 0.0)
+    var s_stop_dist = shadow_result.get("estimated_stopping_distance", 0.0)
+    var s_warning_idx = shadow_result.get("warning_level", 0)
+    var s_braking_idx = shadow_result.get("braking_state", 0)
+
+    var shadow_braking_strs = ["ACCELERATING", "CRUISING", "PLANNED_DECEL", "EMERGENCY_AEB", "STOPPING_AT_DESTINATION", "COASTING"]
+    var shadow_warning_strs = ["BLUE (Normal)", "YELLOW (Caution)", "RED (AEB/Emergency)"]
+    var s_braking_str = shadow_braking_strs[s_braking_idx] if s_braking_idx >= 0 and s_braking_idx < shadow_braking_strs.size() else "UNKNOWN"
+    var s_warning_str = shadow_warning_strs[s_warning_idx] if s_warning_idx >= 0 and s_warning_idx < shadow_warning_strs.size() else "BLUE"
+
     if hud_label:
         hud_label.text = "[EASY DRIVE 3D SIMULATION - TEST 001]\n" + \
             "Scenario: %s\n" % [scenario_name] + \
@@ -161,6 +196,15 @@ func _process(delta: float) -> void:
             "Ego Speed: %.1f m/s (%.1f km/h)\n" % [ego_speed, ego_speed * 3.6] + \
             "Signed Clearance / Distance: %.2f m\n" % [raw_bumper_sep] + \
             "Obstacle State: %s\n" % [obstacle_state_str] + \
-            "Braking State: %s\n" % [braking_state] + \
+            "Braking State (GDScript): %s\n" % [braking_state] + \
             "Status: %s\n" % [contact_status] + \
+            "----------------------------------------\n" + \
+            "C++ SHADOW TELEMETRY (Shadow Mode):\n" + \
+            "  - Braking State: %s\n" % [s_braking_str] + \
+            "  - Warning Level: %s\n" % [s_warning_str] + \
+            "  - Control Input: %.2f | ACC Active: %s\n" % [s_control, s_acc] + \
+            "  - AEB Triggered: %s\n" % [s_aeb] + \
+            "  - Bumper Clearance: %.2f m\n" % [s_clearance] + \
+            "  - Est. Stopping Dist: %.2f m\n" % [s_stop_dist] + \
+            "----------------------------------------\n" + \
             "Controls: [1] Blocked-Road | [2] Clear-Road | [SPACE] Auto/Manual | [R] Reset"
