@@ -45,9 +45,3 @@ set_target_properties(easydrive_extension PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/godot_sim/bin"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/godot_sim/bin"
 )
-
-add_custom_command(TARGET easydrive_extension POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-        "$<TARGET_FILE:easydrive_extension>"
-        "${CMAKE_CURRENT_SOURCE_DIR}/godot_sim/bin/easydrive_extension.dll"
-)

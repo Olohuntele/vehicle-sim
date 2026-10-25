@@ -14,6 +14,10 @@ var auto_drive: bool = true
 var ego_length: float = 4.0
 var lead_length: float = 4.0
 
+enum DrivingAuthority { GDSCRIPT, CPP }
+var driving_authority: DrivingAuthority = DrivingAuthority.GDSCRIPT
+var key3_pressed_last_frame: bool = false
+
 var cpp_bridge = null
 
 @onready var ego_car: Node3D = $EgoCar
@@ -54,6 +58,15 @@ func _process(delta: float) -> void:
         scenario_blocked_road = false
         reset_simulation()
 
+    # Toggle Driving Authority Mode with Key 3 (just-pressed check)
+    var key3_current = Input.is_key_pressed(KEY_3)
+    if key3_current and not key3_pressed_last_frame:
+        if driving_authority == DrivingAuthority.GDSCRIPT:
+            driving_authority = DrivingAuthority.CPP
+        else:
+            driving_authority = DrivingAuthority.GDSCRIPT
+    key3_pressed_last_frame = key3_current
+
     if Input.is_action_just_pressed("ui_accept") or Input.is_key_pressed(KEY_SPACE):
         auto_drive = !auto_drive
 
@@ -66,73 +79,107 @@ func _process(delta: float) -> void:
     elif Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S):
         manual_input = -1.0
 
-    # --- 2. Autonomous Control Calculation (Easy Drive Test 001) ---
+    # --- 2. Controller Evaluation via GDExtension (Unified Actuator & Shadow Step) ---
+    var cpp_result = {}
+    if cpp_bridge and cpp_bridge.has_method("evaluate_actuator_step"):
+        var obs_detected = scenario_blocked_road
+        var obs_pos = lead_pos if scenario_blocked_road else 999.0
+        var obs_speed = lead_speed if scenario_blocked_road else 0.0
+        cpp_result = cpp_bridge.evaluate_actuator_step(
+            ego_pos, ego_speed, 0.0,
+            obs_detected, obs_pos, obs_speed,
+            auto_drive, manual_input, target_b
+        )
+
+    # --- 2.5 Autonomous Control Calculation (Authority Mode Selection) ---
     var accel: float = 0.0
     var braking_state: String = "COASTING"
     var obstacle_state_str: String = "CLEAR"
 
-    if auto_drive && manual_input == 0.0:
-        if scenario_blocked_road:
-            # Blocked Road Scenario: Obstacle at Z=60
-            var lead_rear: float = lead_pos - lead_length / 2.0
-            var ego_front: float = ego_pos + ego_length / 2.0
-            var bumper_sep: float = lead_rear - ego_front
+    if driving_authority == DrivingAuthority.CPP:
+        # C++ Driving Authority Mode
+        if cpp_result.is_empty() or not cpp_result.get("valid", false) or cpp_result.get("fault_detected", false):
+            # Fail-safe fallback: Reject invalid/malformed command and apply max simulated braking
+            accel = -ego_max_brake
+            braking_state = "C++ FAULT / FAIL-SAFE BRAKE"
+            obstacle_state_str = "FAULT DETECTED (SAFE BRAKE)"
+        elif auto_drive && manual_input == 0.0:
+            var throttle_d = cpp_result.get("throttle_demand", 0.0)
+            var brake_d = cpp_result.get("brake_demand", 0.0)
+            var emergency = cpp_result.get("emergency_braking", false)
 
-            # Braking distance: v^2 / (2 * max_brake) + safety margin (2.5m) + step buffer
-            var braking_dist: float = (ego_speed * ego_speed) / (2.0 * ego_max_brake) + 2.5 + ego_speed * delta
-
-            if bumper_sep <= braking_dist || ego_pos >= lead_pos - 12.0:
-                accel = -ego_max_brake
-                braking_state = "AEB / PLANNED BRAKING"
-                obstacle_state_str = "OBSTACLE DETECTED (APPROACHING)"
-            elif ego_speed < 10.0:
-                accel = ego_max_accel
-                braking_state = "ACCELERATING"
-                obstacle_state_str = "OBSTACLE AHEAD (Z=60)"
+            if emergency or brake_d > 0.0:
+                accel = -max(brake_d, 0.5) * ego_max_brake
+                braking_state = "C++ AEB / BRAKING"
+            elif throttle_d > 0.0:
+                accel = throttle_d * ego_max_accel
+                braking_state = "C++ ACCELERATING"
             else:
-                accel = 0.0
-                braking_state = "CRUISING"
-                obstacle_state_str = "OBSTACLE AHEAD (Z=60)"
+                accel = -0.1 # coasting
+                braking_state = "C++ COASTING"
+            obstacle_state_str = "C++ AUTONOMOUS CONTROL ACTIVE"
         else:
-            # Clear Road Scenario: Stop at Point B (Z=100)
-            var dist_to_b: float = target_b - ego_pos
-            var braking_dist: float = (ego_speed * ego_speed) / (2.0 * ego_max_brake) + ego_speed * delta
-
-            if dist_to_b <= braking_dist + 1.0 || ego_pos >= target_b:
-                accel = -ego_max_brake
-                braking_state = "STOPPING AT DESTINATION B"
-                obstacle_state_str = "CLEAR ROAD"
-            elif ego_speed < 10.0:
-                accel = ego_max_accel
-                braking_state = "ACCELERATING TO B"
-                obstacle_state_str = "CLEAR ROAD"
+            # Manual override when in C++ authority mode
+            if manual_input > 0.0:
+                accel = manual_input * ego_max_accel
+                braking_state = "MANUAL ACCEL"
+            elif manual_input < 0.0:
+                accel = manual_input * ego_max_brake
+                braking_state = "MANUAL BRAKE"
             else:
-                accel = 0.0
-                braking_state = "CRUISING TO B"
-                obstacle_state_str = "CLEAR ROAD"
+                accel = -0.5
+                braking_state = "COASTING"
     else:
-        # Manual Input Override
-        if manual_input > 0.0:
-            accel = manual_input * ego_max_accel
-            braking_state = "MANUAL ACCEL"
-        elif manual_input < 0.0:
-            accel = manual_input * ego_max_brake
-            braking_state = "MANUAL BRAKE"
-        else:
-            accel = -0.5 # drag/coasting
-            braking_state = "COASTING"
+        # GDScript Driving Authority Mode (Default)
+        if auto_drive && manual_input == 0.0:
+            if scenario_blocked_road:
+                # Blocked Road Scenario: Obstacle at Z=60
+                var lead_rear: float = lead_pos - lead_length / 2.0
+                var ego_front: float = ego_pos + ego_length / 2.0
+                var bumper_sep: float = lead_rear - ego_front
 
-    # --- 2.5 C++ Shadow Evaluation (Shadow Mode Only) ---
-    var shadow_result = {}
-    if cpp_bridge and cpp_bridge.has_method("evaluate_shadow_step"):
-        var obs_detected = scenario_blocked_road
-        var obs_pos = lead_pos if scenario_blocked_road else 999.0
-        var obs_speed = lead_speed if scenario_blocked_road else 0.0
-        shadow_result = cpp_bridge.evaluate_shadow_step(
-            ego_pos, ego_speed, accel,
-            obs_detected, obs_pos, obs_speed,
-            auto_drive, manual_input, target_b
-        )
+                var braking_dist: float = (ego_speed * ego_speed) / (2.0 * ego_max_brake) + 2.5 + ego_speed * delta
+
+                if bumper_sep <= braking_dist || ego_pos >= lead_pos - 12.0:
+                    accel = -ego_max_brake
+                    braking_state = "AEB / PLANNED BRAKING"
+                    obstacle_state_str = "OBSTACLE DETECTED (APPROACHING)"
+                elif ego_speed < 10.0:
+                    accel = ego_max_accel
+                    braking_state = "ACCELERATING"
+                    obstacle_state_str = "OBSTACLE AHEAD (Z=60)"
+                else:
+                    accel = 0.0
+                    braking_state = "CRUISING"
+                    obstacle_state_str = "OBSTACLE AHEAD (Z=60)"
+            else:
+                # Clear Road Scenario: Stop at Point B (Z=100)
+                var dist_to_b: float = target_b - ego_pos
+                var braking_dist: float = (ego_speed * ego_speed) / (2.0 * ego_max_brake) + ego_speed * delta
+
+                if dist_to_b <= braking_dist + 1.0 || ego_pos >= target_b:
+                    accel = -ego_max_brake
+                    braking_state = "STOPPING AT DESTINATION B"
+                    obstacle_state_str = "CLEAR ROAD"
+                elif ego_speed < 10.0:
+                    accel = ego_max_accel
+                    braking_state = "ACCELERATING TO B"
+                    obstacle_state_str = "CLEAR ROAD"
+                else:
+                    accel = 0.0
+                    braking_state = "CRUISING TO B"
+                    obstacle_state_str = "CLEAR ROAD"
+        else:
+            # Manual Input Override
+            if manual_input > 0.0:
+                accel = manual_input * ego_max_accel
+                braking_state = "MANUAL ACCEL"
+            elif manual_input < 0.0:
+                accel = manual_input * ego_max_brake
+                braking_state = "MANUAL BRAKE"
+            else:
+                accel = -0.5 # drag/coasting
+                braking_state = "COASTING"
 
     # --- 3. Kinematics & Position Update ---
     ego_speed = max(0.0, ego_speed + accel * delta)
@@ -173,13 +220,19 @@ func _process(delta: float) -> void:
         if ego_speed == 0.0 && ego_pos >= 98.0:
             contact_status = "SUCCESS: STOPPED AT POINT B (Z=100)"
 
-    # --- 6. HUD Update (GDScript + C++ Shadow Telemetry) ---
+    # --- 6. HUD Update (Telemetry & Actuator State) ---
     var scenario_name = "BLOCKED-ROAD (Obstacle at Z=60)" if scenario_blocked_road else "CLEAR-ROAD (Destination B at Z=100)"
-    
-    var s_control = shadow_result.get("control_input", 0.0)
-    # --- Stage 3: Controller Comparison ---
-    var cpp_equivalent_accel: float = 0.0
+    var authority_name = "C++ ACTUATOR AUTHORITY" if driving_authority == DrivingAuthority.CPP else "GDSCRIPT AUTHORITY (Default)"
 
+    var s_control = cpp_result.get("control_input", 0.0)
+    var s_throttle = cpp_result.get("throttle_demand", 0.0)
+    var s_brake = cpp_result.get("brake_demand", 0.0)
+    var s_emergency = cpp_result.get("emergency_braking", false)
+    var s_valid = cpp_result.get("valid", true)
+    var s_fault = cpp_result.get("fault_detected", false)
+    var s_fault_reason = cpp_result.get("fault_reason", "None")
+
+    var cpp_equivalent_accel: float = 0.0
     if s_control >= 0.0:
         cpp_equivalent_accel = s_control * ego_max_accel
     else:
@@ -187,31 +240,17 @@ func _process(delta: float) -> void:
 
     var accel_difference: float = abs(accel - cpp_equivalent_accel)
     var comparison_status: String = "MATCH"
-    var comparison_detail: String = ""
-
-    if shadow_result.is_empty():
-        comparison_status = "C++ SHADOW UNAVAILABLE"
-    elif ego_speed < 0.05 and accel <= 0.0 and cpp_equivalent_accel <= 0.0:
-        comparison_status = "STATIONARY - BRAKING / HOLDING"
-    elif accel < -0.05 and cpp_equivalent_accel < -0.05:
-        comparison_status = "BOTH BRAKING"
-    elif accel > 0.05 and cpp_equivalent_accel > 0.05:
-        comparison_status = "BOTH ACCELERATING"
-    elif accel > 0.05 and cpp_equivalent_accel < -0.05:
-        comparison_status = "OPPOSITE DECISIONS"
-    elif accel < -0.05 and cpp_equivalent_accel > 0.05:
-        comparison_status = "OPPOSITE DECISIONS"
+    if cpp_result.is_empty():
+        comparison_status = "C++ BRIDGE UNAVAILABLE"
     elif accel_difference > 0.5:
         comparison_status = "DIFFERENT DECISIONS"
 
-    if not shadow_result.is_empty():
-        comparison_detail = "Intensity difference: %.2f m/sÂ²" % accel_difference
-    var s_aeb = shadow_result.get("aeb_triggered", false)
-    var s_acc = shadow_result.get("acc_active", false)
-    var s_clearance = shadow_result.get("bumper_clearance", 0.0)
-    var s_stop_dist = shadow_result.get("estimated_stopping_distance", 0.0)
-    var s_warning_idx = shadow_result.get("warning_level", 0)
-    var s_braking_idx = shadow_result.get("braking_state", 0)
+    var s_aeb = cpp_result.get("aeb_triggered", false)
+    var s_acc = cpp_result.get("acc_active", false)
+    var s_clearance = cpp_result.get("bumper_clearance", 0.0)
+    var s_stop_dist = cpp_result.get("estimated_stopping_distance", 0.0)
+    var s_warning_idx = cpp_result.get("warning_level", 0)
+    var s_braking_idx = cpp_result.get("braking_state", 0)
 
     var shadow_braking_strs = ["ACCELERATING", "CRUISING", "PLANNED_DECEL", "EMERGENCY_AEB", "STOPPING_AT_DESTINATION", "COASTING"]
     var shadow_warning_strs = ["BLUE (Normal)", "YELLOW (Caution)", "RED (AEB/Emergency)"]
@@ -219,28 +258,26 @@ func _process(delta: float) -> void:
     var s_warning_str = shadow_warning_strs[s_warning_idx] if s_warning_idx >= 0 and s_warning_idx < shadow_warning_strs.size() else "BLUE"
 
     if hud_label:
-        hud_label.text = "[EASY DRIVE 3D SIMULATION - TEST 001]\n" + \
+        hud_label.text = "[EASY DRIVE 3D SIMULATION - STAGE 3C]\n" + \
+            "Driving Authority: %s\n" % [authority_name] + \
             "Scenario: %s\n" % [scenario_name] + \
             "Ego Position Z: %.2f m | Target B: %.1f m\n" % [ego_pos, target_b] + \
             "Ego Speed: %.1f m/s (%.1f km/h)\n" % [ego_speed, ego_speed * 3.6] + \
             "Signed Clearance / Distance: %.2f m\n" % [raw_bumper_sep] + \
             "Obstacle State: %s\n" % [obstacle_state_str] + \
-            "Braking State (GDScript): %s\n" % [braking_state] + \
+            "Braking State: %s\n" % [braking_state] + \
             "Status: %s\n" % [contact_status] + \
             "----------------------------------------\n" + \
-            "C++ SHADOW TELEMETRY (Shadow Mode):\n" + \
-            "  - Braking State: %s\n" % [s_braking_str] + \
-            "  - Warning Level: %s\n" % [s_warning_str] + \
-            "  - Control Input: %.2f | ACC Active: %s\n" % [s_control, s_acc] + \
-            "  - AEB Triggered: %s\n" % [s_aeb] + \
-            "  - Bumper Clearance: %.2f m\n" % [s_clearance] + \
-            "  - Est. Stopping Dist: %.2f m\n" % [s_stop_dist] + \
+            "C++ ACTUATOR & TELEMETRY COMMANDS:\n" + \
+            "  - Throttle Demand: %.2f | Brake Demand: %.2f\n" % [s_throttle, s_brake] + \
+            "  - Emergency Braking: %s | Valid: %s\n" % [s_emergency, s_valid] + \
+            "  - Fault Detected: %s (%s)\n" % [s_fault, s_fault_reason] + \
+            "  - Controller State: %s | Warning: %s\n" % [s_braking_str, s_warning_str] + \
+            "  - AEB Triggered: %s | ACC Active: %s\n" % [s_aeb, s_acc] + \
+            "  - Bumper Clearance: %.2f m | Est. Stop Dist: %.2f m\n" % [s_clearance, s_stop_dist] + \
             "----------------------------------------\n" + \
             "CONTROLLER COMPARISON:\n" + \
-            "  GDScript Accel: %.2f m/sÃ‚Â²\n" % [accel] + \
-            "  C++ Equivalent Accel: %.2f m/sÃ‚Â²\n" % [cpp_equivalent_accel] + \
-            "  Difference: %.2f m/sÃ‚Â²\n" % [accel_difference] + \
-            "  Comparison: %s\n" % [comparison_status] + \
-            "  Detail: %s\n" % [comparison_detail] + \
+            "  Applied Accel: %.2f m/s² | C++ Control Accel: %.2f m/s²\n" % [accel, cpp_equivalent_accel] + \
+            "  Comparison Status: %s (Diff: %.2f)\n" % [comparison_status, accel_difference] + \
             "----------------------------------------\n" + \
-            "Controls: [1] Blocked-Road | [2] Clear-Road | [SPACE] Auto/Manual | [R] Reset"
+            "Controls: [1] Blocked-Road | [2] Clear-Road | [3] Toggle Authority | [SPACE] Auto/Man | [R] Reset"

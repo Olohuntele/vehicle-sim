@@ -1,4 +1,5 @@
 #include "vehicle_core.hpp"
+#include "actuator_commands.hpp"
 
 extern "C" {
 
@@ -48,6 +49,35 @@ __declspec(dllexport) void evaluate_step(void* handle,
     if (out_bumper_clearance) *out_bumper_clearance = output.bumper_clearance;
     if (out_stopping_dist) *out_stopping_dist = output.estimated_stopping_distance;
     if (out_warning_level) *out_warning_level = static_cast<int>(output.warning_level);
+}
+
+__declspec(dllexport) void evaluate_actuator_step(void* handle,
+                                                double ego_pos, double ego_speed, double ego_accel,
+                                                bool obstacle_detected, double obstacle_pos, double obstacle_speed,
+                                                bool auto_drive, double manual_input, double destination_b,
+                                                double* out_throttle, double* out_brake, bool* out_emergency,
+                                                bool* out_valid, bool* out_fault) {
+    if (!handle) return;
+    auto* ctx = static_cast<ControllerContext*>(handle);
+
+    vehicle_sim::CoreInput input;
+    input.ego_state = {ego_speed, ego_accel, ego_pos};
+    input.obstacle = {obstacle_pos, obstacle_speed, obstacle_detected};
+    input.auto_drive = auto_drive;
+    input.manual_input = manual_input;
+    input.destination_b = destination_b;
+    input.vehicle_length = 4.0;
+    input.obstacle_length = 4.0;
+
+    vehicle_sim::CoreOutput output = ctx->controller.evaluate(input);
+    vehicle_sim::ActuatorAdapter adapter;
+    vehicle_sim::ActuatorCommand cmd = adapter.convert(output);
+
+    if (out_throttle) *out_throttle = cmd.throttle_demand;
+    if (out_brake) *out_brake = cmd.brake_demand;
+    if (out_emergency) *out_emergency = cmd.emergency_braking;
+    if (out_valid) *out_valid = cmd.valid;
+    if (out_fault) *out_fault = cmd.fault_detected;
 }
 
 } // extern "C"
