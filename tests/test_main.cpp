@@ -2,6 +2,7 @@
 #include "collision_avoidance.hpp"
 #include "acc_controller.hpp"
 #include "vehicle_core.hpp"
+#include "actuator_commands.hpp"
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -53,6 +54,97 @@ void testACCController() {
     double control = acc.computeControl(ego, obstacle);
     assert(control >= -1.0 && control <= 1.0);
     std::cout << "ACC controller test passed successfully.\n";
+}
+
+void testActuatorAdapter() {
+    std::cout << "Running testActuatorAdapter (Stage 3B Actuator Command Interface)...\n";
+    vehicle_sim::ActuatorAdapter adapter;
+
+    // 1. Acceleration test
+    {
+        vehicle_sim::CoreOutput out;
+        out.control_input = 0.75;
+        out.aeb_triggered = false;
+        out.braking_state = vehicle_sim::BrakingState::ACCELERATING;
+
+        auto cmd = adapter.convert(out);
+        assert(cmd.valid == true);
+        assert(cmd.fault_detected == false);
+        assert(cmd.emergency_braking == false);
+        assert(cmd.throttle_demand == 0.75);
+        assert(cmd.brake_demand == 0.0);
+    }
+
+    // 2. Coasting test
+    {
+        vehicle_sim::CoreOutput out;
+        out.control_input = 0.0;
+        out.aeb_triggered = false;
+        out.braking_state = vehicle_sim::BrakingState::COASTING;
+
+        auto cmd = adapter.convert(out);
+        assert(cmd.valid == true);
+        assert(cmd.throttle_demand == 0.0);
+        assert(cmd.brake_demand == 0.0);
+    }
+
+    // 3. Braking / Planned Decel test
+    {
+        vehicle_sim::CoreOutput out;
+        out.control_input = -0.4;
+        out.aeb_triggered = false;
+        out.braking_state = vehicle_sim::BrakingState::PLANNED_DECEL;
+
+        auto cmd = adapter.convert(out);
+        assert(cmd.valid == true);
+        assert(cmd.throttle_demand == 0.0);
+        assert(cmd.brake_demand >= 0.4);
+        assert(!(cmd.throttle_demand > 0.0 && cmd.brake_demand > 0.0)); // Mutual exclusion
+    }
+
+    // 4. AEB Priority test
+    {
+        vehicle_sim::CoreOutput out;
+        out.control_input = 0.5; // conflicting throttle request
+        out.aeb_triggered = true;
+        out.braking_state = vehicle_sim::BrakingState::EMERGENCY_AEB;
+
+        auto cmd = adapter.convert(out);
+        assert(cmd.valid == true);
+        assert(cmd.emergency_braking == true);
+        assert(cmd.brake_demand == 1.0);
+        assert(cmd.throttle_demand == 0.0);
+    }
+
+    // 5. Invalid Input (Non-finite NaN) test
+    {
+        vehicle_sim::CoreOutput out;
+        out.control_input = NAN;
+        out.aeb_triggered = false;
+
+        auto cmd = adapter.convert(out);
+        assert(cmd.valid == false);
+        assert(cmd.fault_detected == true);
+        assert(cmd.emergency_braking == true);
+        assert(cmd.brake_demand == 1.0); // Fail-safe default brake
+        assert(cmd.throttle_demand == 0.0);
+    }
+
+    // 6. Bounds check & Mutual exclusion
+    {
+        vehicle_sim::CoreOutput out;
+        out.control_input = 2.5; // out of normal range [0, 1]
+        out.aeb_triggered = false;
+        out.braking_state = vehicle_sim::BrakingState::CRUISING;
+
+        auto cmd = adapter.convert(out);
+        assert(cmd.valid == true);
+        assert(cmd.throttle_demand <= 1.0);
+        assert(cmd.throttle_demand >= 0.0);
+        assert(cmd.brake_demand == 0.0);
+    }
+
+    std::cout << "Actuator adapter tests passed successfully.\n";
 }
 
 void testVehicleBridgeInterface() {
@@ -113,6 +205,7 @@ int main() {
         testVehicleKinematicsAndFriction();
         testCollisionAvoidance();
         testACCController();
+        testActuatorAdapter();
         testVehicleBridgeInterface();
         testGDExtensionBridgeLoad();
         std::cout << "=== ALL TESTS PASSED SUCCESSFULLY ===\n";
