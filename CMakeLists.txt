@@ -13,7 +13,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
-add_library(vehicle_core STATIC src/vehicle_core.cpp src/Vehicle.cpp)
+add_library(vehicle_core STATIC src/vehicle_core.cpp src/Vehicle.cpp src/pure_pursuit.cpp)
 target_include_directories(vehicle_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(vehicle_bridge SHARED src/vehicle_bridge.cpp)

@@ -3,6 +3,7 @@
 #include "acc_controller.hpp"
 #include "vehicle_core.hpp"
 #include "actuator_commands.hpp"
+#include "pure_pursuit.hpp"
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -435,6 +436,188 @@ void testStage3CSimulationScenarios() {
     std::cout << "All Stage 3C simulation scenarios verified successfully (PASS).\n";
 }
 
+void testPurePursuitController() {
+    std::cout << "Running testPurePursuitController (Stage 4A Pure Pursuit Steering Controller)...\n";
+
+    // 1. Straight Tracking Test
+    {
+        vehicle_sim::PurePursuitController controller;
+        vehicle_sim::Pose2D pose{0.0, 0.0, 0.0, 10.0}; // x=0, z=0, heading=0, v=10
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 10.0},
+            {0.0, 10.0, 10.0},
+            {0.0, 20.0, 10.0},
+            {0.0, 30.0, 10.0}
+        };
+
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(!output.fault_detected);
+        assert(std::abs(output.steering_command) < 0.05); // Should steer straight (approx 0)
+        assert(std::abs(output.steering_angle) < 0.05);
+    }
+
+    // 2. Left Turn Test (Waypoints curving to the left / negative X)
+    {
+        vehicle_sim::PurePursuitController controller;
+        vehicle_sim::Pose2D pose{0.0, 0.0, 0.0, 5.0};
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 10.0},
+            {-5.0, 10.0, 10.0},
+            {-10.0, 20.0, 10.0}
+        };
+
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(!output.fault_detected);
+        assert(output.steering_angle > 0.0);    // Left turn requires positive steering angle (turn left)
+        assert(output.steering_command > 0.0);  // Left turn requires positive normalized command
+    }
+
+    // 3. Right Turn Test (Waypoints curving to the right / positive X)
+    {
+        vehicle_sim::PurePursuitController controller;
+        vehicle_sim::Pose2D pose{0.0, 0.0, 0.0, 5.0};
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 10.0},
+            {5.0, 10.0, 10.0},
+            {10.0, 20.0, 10.0}
+        };
+
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(!output.fault_detected);
+        assert(output.steering_angle < 0.0);    // Right turn requires negative steering angle (turn right)
+        assert(output.steering_command < 0.0);  // Right turn requires negative normalized command
+    }
+
+    // 4. Duplicate / Degenerate Waypoint Test
+    {
+        vehicle_sim::PurePursuitController controller;
+        vehicle_sim::Pose2D pose{0.0, 0.0, 0.0, 5.0};
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 10.0},
+            {0.0, 0.0, 10.0}, // Duplicate waypoint
+            {0.0, 10.0, 10.0}
+        };
+
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(!output.fault_detected);
+    }
+
+    // 4. Steering Bounds Test
+    {
+        vehicle_sim::PurePursuitConfig config;
+        config.max_steering_angle = 0.5;
+        vehicle_sim::PurePursuitController controller(config);
+        // Extreme lateral offset
+        vehicle_sim::Pose2D pose{0.0, 0.0, 0.0, 5.0};
+        std::vector<vehicle_sim::Waypoint> route = {
+            {50.0, 5.0, 10.0},
+            {50.0, 20.0, 10.0}
+        };
+
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(output.steering_angle >= -0.5 && output.steering_angle <= 0.5);
+        assert(output.steering_command >= -1.0 && output.steering_command <= 1.0);
+    }
+
+    // 5. Waypoint Progression and Route Completion Test
+    {
+        vehicle_sim::PurePursuitController controller;
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 10.0},
+            {0.0, 5.0, 10.0},
+            {0.0, 10.0, 10.0}
+        };
+
+        // Pose near final waypoint
+        vehicle_sim::Pose2D pose{0.0, 9.5, 0.0, 0.0};
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(output.route_completed == true);
+        assert(output.steering_command == 0.0);
+    }
+
+    // 6. Zero-Speed Operation Test
+    {
+        vehicle_sim::PurePursuitController controller;
+        vehicle_sim::Pose2D pose{0.0, 0.0, 0.0, 0.0}; // v = 0.0
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 10.0},
+            {0.0, 10.0, 10.0}
+        };
+
+        auto output = controller.computeSteering(pose, route);
+        assert(output.valid == true);
+        assert(!output.fault_detected);
+    }
+
+    // 7. Invalid Inputs Test (NaN, Inf, Empty Route)
+    {
+        vehicle_sim::PurePursuitController controller;
+        // NaN pose
+        vehicle_sim::Pose2D bad_pose{NAN, 0.0, 0.0, 10.0};
+        std::vector<vehicle_sim::Waypoint> route = {{0.0, 0.0}, {0.0, 10.0}};
+
+        auto output1 = controller.computeSteering(bad_pose, route);
+        assert(output1.valid == false);
+        assert(output1.fault_detected == true);
+
+        // Empty route
+        std::vector<vehicle_sim::Waypoint> empty_route;
+        vehicle_sim::Pose2D good_pose{0.0, 0.0, 0.0, 10.0};
+        auto output2 = controller.computeSteering(good_pose, empty_route);
+        assert(output2.valid == true);
+        assert(output2.route_completed == true);
+    }
+
+    // 8. Kinematic Bicycle Model Test Harness Simulation
+    {
+        vehicle_sim::PurePursuitConfig config;
+        config.wheelbase = 2.5;
+        config.lookahead_distance = 4.0;
+        config.max_steering_angle = 0.6;
+        vehicle_sim::PurePursuitController controller(config);
+
+        vehicle_sim::Pose2D ego{0.0, 0.0, 0.0, 5.0}; // v = 5 m/s
+        std::vector<vehicle_sim::Waypoint> route = {
+            {0.0, 0.0, 5.0},
+            {0.0, 15.0, 5.0},
+            {0.0, 30.0, 5.0}
+        };
+
+        double dt = 0.1;
+        bool reached = false;
+        for (int step = 0; step < 200; ++step) {
+            auto steering_out = controller.computeSteering(ego, route);
+            assert(steering_out.valid);
+
+            if (steering_out.route_completed) {
+                reached = true;
+                break;
+            }
+
+            // Kinematic bicycle model update
+            double delta = steering_out.steering_angle;
+            double v = ego.velocity;
+            double L = config.wheelbase;
+
+            double d_heading = (v / L) * std::tan(delta) * dt;
+            ego.heading += d_heading;
+            ego.x += v * std::sin(ego.heading) * dt;
+            ego.z += v * std::cos(ego.heading) * dt;
+        }
+
+        std::cout << "  [Bicycle Model Simulation Test]: Route completed = " << (reached ? "true" : "false") << "\n";
+        assert(reached);
+    }
+
+    std::cout << "Pure Pursuit controller tests passed successfully.\n";
+}
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -466,6 +649,7 @@ int main() {
         testVehicleBridgeInterface();
         testVehicleBridgeActuatorStep();
         testStage3CSimulationScenarios();
+        testPurePursuitController();
         testGDExtensionBridgeLoad();
         std::cout << "=== ALL TESTS PASSED SUCCESSFULLY ===\n";
         return 0;
