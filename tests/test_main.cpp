@@ -618,6 +618,148 @@ void testPurePursuitController() {
     std::cout << "Pure Pursuit controller tests passed successfully.\n";
 }
 
+void testStage4BSteeringActuatorValidation() {
+    std::cout << "Running testStage4BSteeringActuatorValidation (Stage 4B Steering Actuator Validation & Fault Handling)...\n";
+    vehicle_sim::ActuatorAdapter adapter;
+
+    // 1. Valid Left Steering Test (+ demand)
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.5;
+        core_out.braking_state = vehicle_sim::BrakingState::ACCELERATING;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.steering_command = 0.6; // Left turn
+        steering_out.steering_angle = 0.3;
+        steering_out.valid = true;
+        steering_out.fault_detected = false;
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == true);
+        assert(cmd.fault_detected == false);
+        assert(cmd.steering_demand == 0.6);
+        assert(cmd.throttle_demand == 0.5);
+    }
+
+    // 2. Valid Right Steering Test (- demand)
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.5;
+        core_out.braking_state = vehicle_sim::BrakingState::ACCELERATING;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.steering_command = -0.4; // Right turn
+        steering_out.steering_angle = -0.2;
+        steering_out.valid = true;
+        steering_out.fault_detected = false;
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == true);
+        assert(cmd.steering_demand == -0.4);
+    }
+
+    // 3. Straight Steering Test (0 demand)
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.0;
+        core_out.braking_state = vehicle_sim::BrakingState::COASTING;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.steering_command = 0.0;
+        steering_out.steering_angle = 0.0;
+        steering_out.valid = true;
+        steering_out.fault_detected = false;
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == true);
+        assert(cmd.steering_demand == 0.0);
+    }
+
+    // 4. Steering Saturation Test (clamping out-of-bounds demand > 1.0 or < -1.0)
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.5;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.steering_command = 2.5; // Out of bounds
+        steering_out.steering_angle = 1.2;
+        steering_out.valid = true;
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == true);
+        assert(cmd.steering_demand == 1.0); // Clamped to 1.0
+    }
+
+    // 5. Invalid Values (NaN / Inf) Steering Test
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.5;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.steering_command = NAN;
+        steering_out.steering_angle = 0.2;
+        steering_out.valid = true;
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == false);
+        assert(cmd.fault_detected == true);
+        assert(cmd.steering_demand == 0.0); // Centered fallback on fault
+        assert(cmd.brake_demand == 1.0);
+    }
+
+    // 6. Fault Propagation & Safe Simulated Response Test
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.5;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.valid = false;
+        steering_out.fault_detected = true;
+        steering_out.fault_reason = "Pure Pursuit sensor fault";
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == false);
+        assert(cmd.fault_detected == true);
+        assert(cmd.steering_demand == 0.0); // Steering centered as fallback
+        assert(cmd.throttle_demand == 0.0); // No propulsion
+        assert(cmd.brake_demand == 1.0);    // Safe braking applied
+    }
+
+    // 7. AEB Priority Preservation Test (AEB active retains valid steering while forcing max brake)
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.5;
+        core_out.aeb_triggered = true;
+        core_out.braking_state = vehicle_sim::BrakingState::EMERGENCY_AEB;
+
+        vehicle_sim::SteeringOutput steering_out;
+        steering_out.steering_command = 0.5;
+        steering_out.valid = true;
+
+        auto cmd = adapter.convert(core_out, steering_out);
+        assert(cmd.valid == true);
+        assert(cmd.emergency_braking == true);
+        assert(cmd.brake_demand == 1.0);
+        assert(cmd.throttle_demand == 0.0);
+        assert(cmd.steering_demand == 0.5); // Steering demand preserved during AEB
+    }
+
+    // 8. Stage 3C Backward Compatibility Test (longitudinal-only caller)
+    {
+        vehicle_sim::CoreOutput core_out;
+        core_out.control_input = 0.8;
+        core_out.braking_state = vehicle_sim::BrakingState::ACCELERATING;
+
+        auto cmd = adapter.convert(core_out); // Single argument overload (Stage 3C style)
+        assert(cmd.valid == true);
+        assert(cmd.throttle_demand == 0.8);
+        assert(cmd.brake_demand == 0.0);
+        assert(cmd.steering_demand == 0.0); // Default neutral steering
+    }
+
+    std::cout << "Stage 4B steering actuator validation tests passed successfully.\n";
+}
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -650,6 +792,7 @@ int main() {
         testVehicleBridgeActuatorStep();
         testStage3CSimulationScenarios();
         testPurePursuitController();
+        testStage4BSteeringActuatorValidation();
         testGDExtensionBridgeLoad();
         std::cout << "=== ALL TESTS PASSED SUCCESSFULLY ===\n";
         return 0;
