@@ -27,6 +27,14 @@ extern "C" {
                                 bool auto_drive, double manual_input, double destination_b,
                                 double* out_throttle, double* out_brake, bool* out_emergency,
                                 bool* out_valid, bool* out_fault);
+    void evaluate_path_step(void* handle,
+                            double ego_x, double ego_z, double ego_heading, double ego_speed, double ego_accel,
+                            const double* wp_x, const double* wp_z, int wp_count,
+                            bool obstacle_detected, double obstacle_pos, double obstacle_speed,
+                            bool auto_drive, double manual_input, double destination_b,
+                            double* out_throttle, double* out_brake, double* out_steering,
+                            bool* out_emergency, bool* out_valid, bool* out_fault,
+                            bool* out_route_completed, double* out_cross_track_error);
 }
 
 void testVehicleKinematicsAndFriction() {
@@ -760,6 +768,102 @@ void testStage4BSteeringActuatorValidation() {
     std::cout << "Stage 4B steering actuator validation tests passed successfully.\n";
 }
 
+void testBridgePathEvaluation() {
+    std::cout << "Running testBridgePathEvaluation (Stage 4C Bridge Path & Steering Evaluation)...\n";
+    void* handle = create_controller(2.0, 5.0, 8.0, 10.0, 1.5);
+    assert(handle != nullptr);
+
+    // 1. Straight tracking test
+    {
+        std::vector<double> wx = {0.0, 0.0, 0.0};
+        std::vector<double> wz = {0.0, 10.0, 20.0};
+        double throttle = 0, brake = 0, steering = 0;
+        bool emergency = false, valid = false, fault = true, completed = false;
+        double cte = 0;
+
+        evaluate_path_step(handle, 0.0, 0.0, 0.0, 5.0, 0.0,
+                           wx.data(), wz.data(), wx.size(),
+                           false, 999.0, 0.0, true, 0.0, 50.0,
+                           &throttle, &brake, &steering, &emergency, &valid, &fault, &completed, &cte);
+
+        assert(valid == true);
+        assert(fault == false);
+        assert(std::abs(steering) < 0.05);
+    }
+
+    // 2. Left turn test (waypoints at -X)
+    {
+        std::vector<double> wx = {0.0, -5.0, -10.0};
+        std::vector<double> wz = {0.0, 10.0, 20.0};
+        double throttle = 0, brake = 0, steering = 0;
+        bool emergency = false, valid = false, fault = true, completed = false;
+        double cte = 0;
+
+        evaluate_path_step(handle, 0.0, 0.0, 0.0, 5.0, 0.0,
+                           wx.data(), wz.data(), wx.size(),
+                           false, 999.0, 0.0, true, 0.0, 50.0,
+                           &throttle, &brake, &steering, &emergency, &valid, &fault, &completed, &cte);
+
+        assert(valid == true);
+        assert(steering > 0.0); // Left turn -> positive steering demand
+    }
+
+    // 3. Right turn test (waypoints at +X)
+    {
+        std::vector<double> wx = {0.0, 5.0, 10.0};
+        std::vector<double> wz = {0.0, 10.0, 20.0};
+        double throttle = 0, brake = 0, steering = 0;
+        bool emergency = false, valid = false, fault = true, completed = false;
+        double cte = 0;
+
+        evaluate_path_step(handle, 0.0, 0.0, 0.0, 5.0, 0.0,
+                           wx.data(), wz.data(), wx.size(),
+                           false, 999.0, 0.0, true, 0.0, 50.0,
+                           &throttle, &brake, &steering, &emergency, &valid, &fault, &completed, &cte);
+
+        assert(valid == true);
+        assert(steering < 0.0); // Right turn -> negative steering demand
+    }
+
+    // 4. Route completion test
+    {
+        std::vector<double> wx = {0.0, 0.0};
+        std::vector<double> wz = {0.0, 10.0};
+        double throttle = 0, brake = 0, steering = 0;
+        bool emergency = false, valid = false, fault = true, completed = false;
+        double cte = 0;
+
+        evaluate_path_step(handle, 0.0, 9.5, 0.0, 0.0, 0.0, // near final waypoint (0, 10)
+                           wx.data(), wz.data(), wx.size(),
+                           false, 999.0, 0.0, true, 0.0, 50.0,
+                           &throttle, &brake, &steering, &emergency, &valid, &fault, &completed, &cte);
+
+        assert(completed == true);
+        assert(valid == true);
+    }
+
+    // 5. AEB priority test
+    {
+        std::vector<double> wx = {0.0, 0.0};
+        std::vector<double> wz = {0.0, 50.0};
+        double throttle = 0, brake = 0, steering = 0;
+        bool emergency = false, valid = false, fault = true, completed = false;
+        double cte = 0;
+
+        evaluate_path_step(handle, 0.0, 10.0, 0.0, 10.0, 0.0,
+                           wx.data(), wz.data(), wx.size(),
+                           true, 12.0, 0.0, // Imminent obstacle
+                           true, 0.0, 50.0,
+                           &throttle, &brake, &steering, &emergency, &valid, &fault, &completed, &cte);
+
+        assert(emergency == true);
+        assert(brake == 1.0);
+    }
+
+    destroy_controller(handle);
+    std::cout << "Bridge path evaluation tests passed successfully.\n";
+}
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -793,6 +897,7 @@ int main() {
         testStage3CSimulationScenarios();
         testPurePursuitController();
         testStage4BSteeringActuatorValidation();
+        testBridgePathEvaluation();
         testGDExtensionBridgeLoad();
         std::cout << "=== ALL TESTS PASSED SUCCESSFULLY ===\n";
         return 0;
